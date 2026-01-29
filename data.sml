@@ -7,6 +7,8 @@ datatype formula = True | False
                 | Not of formula | And of (formula * formula) | Or of (formula * formula)
                 | Implies of (formula * formula)
 
+datatype satisfiability = SAT | UNSAT
+
 (* variable * coefficient, and then the constant on the right *)
 (* eg 2x + 3y <= 5 --> [(x, 2), (y, 3)], 5  *)
 type linear_ineq = (string * int) list * int
@@ -62,18 +64,18 @@ fun negateFormula (f: formula): formula =
         | False => True
         | Lt(t1, t2) => Gte(t1, t2)
         | Lte(a, b) => Gt(a, b)
-        | Gte(a, b) => Le(a, b)
-        | Gte(a, b) => Lt(a, b)
+        | Gt(a, b) => Gt(a, b)
+        | Gte(a, b) => Gte(a, b)
         | Eq(a, b) => Or(Lt(a, b), Gt(a, b)) 
         | Not(f2) => f2
-        | And(p, q) => Or(negate p, negate q)
-        | Or(p, q) => And(negate p, negate q)
-        | Implies(p, q) => And(p, negate q)
+        | And(p, q) => Or(negateFormula p, negateFormula q)
+        | Or(p, q) => And(negateFormula p, negateFormula q)
+        | Implies(p, q) => And(p, negateFormula q)
 
 (* distributive property *)
 fun distributeAnd (f1, f2) = 
     (* cross product + flattening *)
-    List.concat(List.map(fn left => List.map(fn right => left @ right)f1) f2))
+    List.concat(List.map(fn left => List.map(fn right => left @ right)f1) f2)
 
 (* DNF *)
 (* (outer list is OR, inner lists are AND) *)
@@ -98,21 +100,16 @@ fun normaliseFormula (f: formula): linear_ineq list list =
         | Eq(a,b) => [ [ normaliseTerms(a, b), normaliseTerms(b, a) ] ]
 
         | Not(f1) => normaliseFormula
-     (negate f1)
+     (negateFormula f1)
 
         (* (A v B) ^ (C v D) -> (A ^ C) v (A ^ D) v (B ^ C) v (B ^ D) *)
-        | And(f1, f2) => distributeAnd (normaliseFormula
-     f1, normaliseFormula
-     f2)
+        | And(f1, f2) => distributeAnd (normaliseFormula f1, normaliseFormula f2)
 
-        | Or(f1, f2) => (normaliseFormula
-     p) @ (normaliseFormula
-     q)
+        | Or(f1, f2) => (normaliseFormula f1) @ (normaliseFormula f2)
         
         (* P->Q = !P v Q *)
         | Implies(f1, f2) => 
             (normaliseFormula
-         (negate p)) @ (normaliseFormula
-         q)
+         (negateFormula f1)) @ (normaliseFormula f2)
 
 (* todo: validity check............ *)
