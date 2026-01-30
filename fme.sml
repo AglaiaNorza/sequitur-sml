@@ -48,8 +48,14 @@ fun crossProduct((posList: linear_ineq list), (negList: linear_ineq list), x: st
         ) negList
     )
 
-(* TODO *)
-fun isContraddictory(constraints: linear_ineq list) = false
+(* 
+    format is (vars) <= const, so one is contraddictory if
+    there are no vars (so, it's 0 on the left side)
+    and the right side is not >= 0
+    ( 0 <= -5 is contraddictory )
+  *)
+fun isContraddictory(constraints: linear_ineq list) = 
+    List.exists(fn(vars, const)=> const < 0 andalso List.all (fn (_, coeff) => coeff = 0) vars) constraints
 
 fun solve((constraints: linear_ineq list), variables: string list) = 
     if isContraddictory(constraints) then UNSAT
@@ -70,3 +76,23 @@ fun solve((constraints: linear_ineq list), variables: string list) =
                             solve(newConstraints @ noX, rest)
                         end
                 end
+
+fun check_scenario(constraints) = 
+        let
+            val vars = getVariables(constraints)
+        in
+            solve(constraints, vars)
+        end
+
+fun verify(f: formula) = 
+    let
+        val negated_f = negateFormula f
+        (* we need to prove that ~f is UNSAT *)
+        
+        (* list of lists of constraints, in DNF *)
+        val scenarios = normaliseFormula negated_f
+    in
+        if List.all (fn s => check_scenario(s) = UNSAT) scenarios 
+        then "VALID implication!!"
+        else "INVALID implication. srry."
+    end

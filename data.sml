@@ -17,15 +17,59 @@ type linear_ineq = (string * int) list * int
 (* like 2x+ 3y + 2 + 5 --> [(x,2), (y,3)], 7 *)
 type flat_term = (string * int) list * int
 
+(* MCD *)
+fun gcd (a, 0) = abs a
+  | gcd (a, b) = gcd (b, a mod b)
+
+(* MCD of a list *)
+fun listGcd [] = 0
+  | listGcd (x::rest) = gcd(x, listGcd rest)
+
+
+(* FME is made for Reals - we want Ints  *)
+(* so, we can use the GCD to "tighten" the constraints *)
+(* effectively reducing to an Int problem *)
+(* ex. 2x + 4y <= 7 *)
+(* we divide by 2 (gcd(2,4)) *)
+(* but we also divide the constant, obtaining 3 (we round down) *)
+fun tightenConstraint ((vars, k): linear_ineq) : linear_ineq =
+    let
+        val coeffs = List.map (fn (_, c) => c) vars
+        
+        val gcd = listGcd coeffs
+    in
+        (* no division by 0 *)
+        if gcd = 0 then 
+            (vars, k)
+        else
+            (* 'div' rounds down *)
+            ((List.map (fn (v, c) => (v, c div gcd)) vars), (k div gcd))
+    end
+
+fun onlyDistinct [] = []
+  | onlyDistinct (x::rest) = x :: onlyDistinct (List.filter (fn y => x <> y) rest)
+
+fun getVariables(constraints: linear_ineq list) =
+    onlyDistinct (List.concat (
+            List.map (fn (vars, const) => 
+                List.map (fn (x, _) => 
+                    x
+                ) vars
+            ) constraints
+        ))
+
+(* "collapses" terms so all variables only appear once *)
 fun addAndCollapse ([]) = []
     | addAndCollapse ((var, coeff)::rest) =
         let
             (* splits into two lists: one with the tuples w/keys matching var, and one with the others *)
             val (matches, others) = List.partition (fn (v, _) => v = var) rest
             (* foldl "accumulates" over (var, coeff), summing up values *)
-            val newMe = List.foldl (fn ((_, v), (x, current_sum)) => (x, current_sum + v)) (var, coeff) matches 
-        in
-            newMe::addAndCollapse(others)
+            val newMe = List.foldl (fn ((_, v), (x, current_sum)) => (x, current_sum + v)) (var, coeff) matches
+            val (_, newCoeff) = newMe 
+        in  
+            if newCoeff = 0 then addAndCollapse(others)
+            else newMe::addAndCollapse(others)
         end
 
 (* sums "polynomial" terms maintaining flat term structure *)
@@ -64,8 +108,8 @@ fun negateFormula (f: formula): formula =
         | False => True
         | Lt(t1, t2) => Gte(t1, t2)
         | Lte(a, b) => Gt(a, b)
-        | Gt(a, b) => Gt(a, b)
-        | Gte(a, b) => Gte(a, b)
+        | Gt(a, b) => Lte(a, b)
+        | Gte(a, b) => Lt(a, b)
         | Eq(a, b) => Or(Lt(a, b), Gt(a, b)) 
         | Not(f2) => f2
         | And(p, q) => Or(negateFormula p, negateFormula q)
@@ -81,23 +125,23 @@ fun distributeAnd (f1, f2) =
 (* (outer list is OR, inner lists are AND) *)
 fun normaliseFormula (f: formula): linear_ineq list list =
     case f of
-        Lte(a, b) => [[normaliseTerms(a, b)]]
+        Lte(a, b) => [ [ tightenConstraint(normaliseTerms(a, b)) ] ]
 
         (* a < b -> a <= b-1 -> a-b => -1 *)
         | Lt(a, b) => 
             let val (vars, k) = normaliseTerms(a, b) 
-                in [[ (vars, k - 1) ]] end
+                in [ [ tightenConstraint(vars, k - 1) ]] end
 
         (* a >= b -> b <= a *)
-        | Gte(a, b) => [[normaliseTerms(b, a)]]
+        | Gte(a, b) => [ [ tightenConstraint(normaliseTerms(b, a)) ] ]
 
         (* a > b  -> b < a -> b <= a - 1 *)
         | Gt(a, b) => 
             let val (vars, k) = normaliseTerms(b, a)
-                in [[ (vars, k-1) ]] end
+                in [[ tightenConstraint(vars, k-1) ]] end
 
         (* a = b  -> a <= b AND b <= a *)
-        | Eq(a,b) => [ [ normaliseTerms(a, b), normaliseTerms(b, a) ] ]
+        | Eq(a,b) => [ [ tightenConstraint(normaliseTerms(a, b)), tightenConstraint(normaliseTerms(b, a)) ] ]
 
         | Not(f1) => normaliseFormula
      (negateFormula f1)
@@ -112,4 +156,7 @@ fun normaliseFormula (f: formula): linear_ineq list list =
             (normaliseFormula
          (negateFormula f1)) @ (normaliseFormula f2)
 
-(* todo: validity check............ *)
+         | True => [ [ ] ] (* no constraints *)
+
+         | False => [] (* no scenarios *)
+

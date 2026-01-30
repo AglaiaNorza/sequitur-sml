@@ -1,2 +1,0 @@
-todo:
-- [ ] Fourier-Motzkin elimination
