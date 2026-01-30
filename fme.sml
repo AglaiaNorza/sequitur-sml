@@ -49,16 +49,16 @@ fun crossProduct((posList: linear_ineq list), (negList: linear_ineq list), x: st
     )
 
 (* 
-    format is (vars) <= const, so one is contraddictory if
+    format is (vars) <= const, so one is contradictory if
     there are no vars (so, it's 0 on the left side)
     and the right side is not >= 0
     ( 0 <= -5 is contraddictory )
   *)
-fun isContraddictory(constraints: linear_ineq list) = 
+fun isContradictory(constraints: linear_ineq list) = 
     List.exists(fn(vars, const)=> const < 0 andalso List.all (fn (_, coeff) => coeff = 0) vars) constraints
 
 fun solve((constraints: linear_ineq list), variables: string list) = 
-    if isContraddictory(constraints) then UNSAT
+    if isContradictory(constraints) then UNSAT
     else
         case variables of
             [] => SAT 

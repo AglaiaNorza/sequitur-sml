@@ -89,7 +89,7 @@ fun flattenTerms (t: term): flat_term =
             (case (t1, t2) of
                 (Const t1, t2) => multiplyTerms(t1, flattenTerms t2)
                 | (t1, Const t2) => multiplyTerms(t2, flattenTerms t1)
-                | _ => raise Fail "nop" (* must be linear *))
+                | _ => raise Fail "non-linear term!" (* must be linear *))
         | Const c => ([],  c)
         | Var x => ([(x, 1)], 0)
         
