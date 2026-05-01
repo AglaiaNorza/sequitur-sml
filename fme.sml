@@ -18,7 +18,6 @@ fun evaluate_rest(vars, model) k =
 (* finds an int that satisfies all constraints for variable 'x' given a partial model *)
 fun find_valid_int(x, constraints, model) =
     let
-        (* we want an x s.t.: coeff * x <= k - (rest of the terms) *)
         fun get_limit((vars, k)) =
             let
                 val SOME(_, coeff) = List.find (fn (v, _) => v = x) vars
@@ -29,22 +28,22 @@ fun find_valid_int(x, constraints, model) =
 
         val limits = List.map get_limit constraints
         
-        (* if coeff > 0: x <= k/coeff (floor) *)
-        (* if coeff < 0: x >= k/coeff (ceil) *)
         val upper_bounds = List.filter (fn (c, _) => c > 0) limits
         val lower_bounds = List.filter (fn (c, _) => c < 0) limits
 
-        val max_v = List.foldl (fn ((c, k), cur) => 
-            Int.min(cur, k div c)) 1000000 upper_bounds
+        val max_v_opt = case upper_bounds of
+            [] => NONE
+          | (c,k)::rest => SOME (List.foldl (fn ((c, k), cur) => Int.min(cur, k div c)) (k div c) rest)
         
-        val min_v = List.foldl (fn ((c, k), cur) => 
-            let val ceil = if k >= 0 then (k + c + 1) div c else k div c 
-            in Int.max(cur, ceil) end) ~1000000 lower_bounds
+        val min_v_opt = case lower_bounds of
+            [] => NONE
+          | (c,k)::rest => SOME (List.foldl (fn ((c, k), cur) => Int.max(cur, ~( (~k) div c ))) (~( (~k) div c )) rest)
     in
-        (* any value in range [min_v, max_v] is ok - we just pick min_v *)
-        min_v
+        case (min_v_opt, max_v_opt) of
+            (SOME min_val, _) => min_val   (* pick the tightest lower bound if it exists *)
+          | (NONE, SOME max_val) => max_val  (* if only upper bounded, pick the upper bound *)
+          | (NONE, NONE) => 0  (* if completely unbounded, pick a clean 0 *)
     end
-
 
 (* constraints: [ ([(x,2), (y, 5)], 7), ([(x,-10), (z, 32)], 8) ] *)
 (* splits list  of linear equations into three based on coefficient of given string *)
