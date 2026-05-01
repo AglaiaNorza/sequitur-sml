@@ -158,12 +158,7 @@ fun generic_verify solver formatter (f: formula) =
 
 (* "simple" version: we don't need a countermodel *)
 fun verify f = 
-    let 
-        fun simple_solver (c, v) = if solve(c, v) = SAT then SOME () else NONE
-        fun simple_format _ = "INVALID implication. srry."
-    in
-        generic_verify simple_solver simple_format f
-    end
+    generic_verify solve (fn _ => "INVALID implication. srry.") f
 
 (* witness version: uses backtracking solver *)
 fun verify_with_counterexample f =
