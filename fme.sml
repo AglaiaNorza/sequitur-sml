@@ -1,5 +1,51 @@
 use "data.sml";
 
+(* --------------------- utils ------------------------ *)
+(* 
+* substitutes to move all 'known' variables to the constant side of the inequality 
+* starting with the original constant 'k', it subtracts (coefficient * assigned_value) 
+* for every term whose variable is already in the model
+* (transforms a multi-variable inequality (eg cx*x + c1*v1 + ... <= k) 
+* into a simplified bound (cx*x <= k_new) for the variable currently being solved
+*)
+fun evaluate_rest(vars, model) k =
+    List.foldl (fn ((v, c), acc) =>
+        case List.find (fn (m_var, _) => m_var = v) model of
+            SOME(_, value) => acc - (c * value)
+          | NONE => acc
+    ) k vars
+
+(* finds an int that satisfies all constraints for variable 'x' given a partial model *)
+fun find_valid_int(x, constraints, model) =
+    let
+        (* we want an x s.t.: coeff * x <= k - (rest of the terms) *)
+        fun get_limit((vars, k)) =
+            let
+                val SOME(_, coeff) = List.find (fn (v, _) => v = x) vars
+                val remaining_k = evaluate_rest(List.filter (fn (v, _) => v <> x) vars, model) k
+            in
+                (coeff, remaining_k)
+            end
+
+        val limits = List.map get_limit constraints
+        
+        (* if coeff > 0: x <= k/coeff (floor) *)
+        (* if coeff < 0: x >= k/coeff (ceil) *)
+        val upper_bounds = List.filter (fn (c, _) => c > 0) limits
+        val lower_bounds = List.filter (fn (c, _) => c < 0) limits
+
+        val max_v = List.foldl (fn ((c, k), cur) => 
+            Int.min(cur, k div c)) 1000000 upper_bounds
+        
+        val min_v = List.foldl (fn ((c, k), cur) => 
+            let val ceil = if k >= 0 then (k + c + 1) div c else k div c 
+            in Int.max(cur, ceil) end) ~1000000 lower_bounds
+    in
+        (* any value in range [min_v, max_v] is ok - we just pick min_v *)
+        min_v
+    end
+
+
 (* constraints: [ ([(x,2), (y, 5)], 7), ([(x,-10), (z, 32)], 8) ] *)
 (* splits list  of linear equations into three based on coefficient of given string *)
 fun partition((constraints: linear_ineq list), x:string) =
@@ -39,7 +85,6 @@ fun resolve((lower_const: linear_ineq), (upper_const: linear_ineq), x: string): 
 
 (* given a list of positive constraints and one of negative, we "resolve" every pair *)
 fun crossProduct((posList: linear_ineq list), (negList: linear_ineq list), x: string) =
-(* i am having so much fun i feel like i'm back using streams in java *)
     List.concat (
         List.map (fn negConst => 
             List.map (fn posConst => 
@@ -57,25 +102,31 @@ fun crossProduct((posList: linear_ineq list), (negList: linear_ineq list), x: st
 fun isContradictory(constraints: linear_ineq list) = 
     List.exists(fn(vars, const)=> const < 0 andalso List.all (fn (_, coeff) => coeff = 0) vars) constraints
 
-fun solve((constraints: linear_ineq list), variables: string list) = 
-    if isContradictory(constraints) then UNSAT
-    else
-        case variables of
-            [] => SAT 
+(* --------------------- core ------------------------ *)
 
-            | (x::rest) => 
-                let
-                    val (pos, neg, noX) = partition (constraints, x)
-                in
-                    if length pos = 0 orelse length neg = 0 then
-                        solve(noX, rest)
-                    else
-                        let
-                            val newConstraints = crossProduct(pos, neg, x)
-                        in
-                            solve(newConstraints @ noX, rest)
-                        end
-                end
+(* returns SOME () if SAT, NONE if UNSAT *)
+fun solve(constraints, []) = if isContradictory(constraints) then NONE else SOME ()
+  | solve(constraints, x::rest) =
+    if isContradictory(constraints) then NONE
+    else
+        let val (pos, neg, noX) = partition (constraints, x)
+        in solve(crossProduct(pos, neg, x) @ noX, rest) end
+
+(* alternative solve function that returns SOME model or NONE *)
+fun solve_with_model(constraints, []) = if isContradictory(constraints) then NONE else SOME []
+  | solve_with_model(constraints, x::rest) =
+    if isContradictory(constraints) then NONE
+    else
+        let
+            val (pos, neg, noX) = partition (constraints, x)
+            val projected = crossProduct(pos, neg, x) @ noX
+        in
+            case solve_with_model(projected, rest) of
+                NONE => NONE
+                (* we look back at the constraints involving 'x' and calculate its 
+                * valid range based on the values already in the model *)
+              | SOME model => SOME ((x, find_valid_int(x, pos @ neg, model)) :: model)
+        end
 
 fun check_scenario(constraints) = 
         let
@@ -84,15 +135,43 @@ fun check_scenario(constraints) =
             solve(constraints, vars)
         end
 
-fun verify(f: formula) = 
+
+(* --------------------- main runners ------------------------ *)
+
+(* handler that takes a solver function and a result-formatter *)
+fun generic_verify solver formatter (f: formula) =
     let
         val negated_f = negateFormula f
-        (* we need to prove that ~f is UNSAT *)
-        
-        (* list of lists of constraints, in DNF *)
         val scenarios = normaliseFormula negated_f
+        
+        fun loop [] = NONE
+          | loop (s::ss) =
+            case solver(s, getVariables s) of
+                 SOME x => SOME x
+               | NONE   => loop ss
     in
-        if List.all (fn s => check_scenario(s) = UNSAT) scenarios 
-        then "VALID implication!!"
-        else "INVALID implication. srry."
+        case loop scenarios of
+            NONE => "VALID implication!!"
+          | SOME result => formatter result
+    end
+
+
+(* "simple" version: we don't need a countermodel *)
+fun verify f = 
+    let 
+        fun simple_solver (c, v) = if solve(c, v) = SAT then SOME () else NONE
+        fun simple_format _ = "INVALID implication. srry."
+    in
+        generic_verify simple_solver simple_format f
+    end
+
+(* witness version: uses backtracking solver *)
+fun verify_with_counterexample f =
+    let
+        fun model_format model =
+            let val str = String.concatWith ", " 
+                (List.map (fn (v, i) => v ^ "=" ^ Int.toString i) model)
+            in "INVALID implication. Counterexample: { " ^ str ^ " }" end
+    in
+        generic_verify solve_with_model model_format f
     end
