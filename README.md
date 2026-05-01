@@ -13,3 +13,4 @@ basics:
 could do:
 - [ ] counterexample generation
 - [ ] simple heuristic to start with variable that generates the fewest new constraints
+- [ ] write simple DPLL/CDCL
